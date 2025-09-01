@@ -2,8 +2,8 @@
 # Project : Bayesian reanalysis of NIVAS
 # Script : prior_specification.R
 # Author : A. Naudet--Lasserre
-# Creation date : 2025-05-13
-# =============================================
+# Date last modification : 2025-09-01
+# ============================================
 
 # I. Original NIVAS trial power assumptions ----------------------------------
 
@@ -73,7 +73,7 @@ cat("95% CI: [", round(or_lower, 3), ", ", round(or_upper, 3), "]\n")
 cat("Log OR:", round(log_or_estimate, 3), "\n")
 
 
-# II. Priors definitions -------------------------------------------------------
+# II. Priors specifications  -------------------------------------------------------
 
 ## A. Minimally informative and skeptical priors for all outcomes ----------------------------
 
@@ -99,30 +99,33 @@ priors_reintubation_d7[["Minimally informative"]] <- prior_minimal
 
 ### 2.  Enthusiastic priorr ----
 
-priors_reintubation <- data.frame(
-  prior_name = c("Weakly informative", "Skeptical", "Optimistic", "Pessimistic"),
-  prior_mean = c(0, 0, log(0.3589744), log(1 / 0.3589744)),
-  prior_sd = c(5, 0.355, 0.9884903, 0.9884903)
-)
+# priors_reintubation <- data.frame(
+#   prior_name = c("Weakly informative", "Skeptical", "Optimistic", "Pessimistic"),
+#   prior_mean = c(0, 0, log(0.3589744), log(1 / 0.3589744)),
+#   prior_sd = c(5, 0.355, 0.9884903, 0.9884903)
+# )
+
+
+
 # Standard deviation to allow 15% chance of harm (OR > 1) (Zampieri et al.2021)
-enthusiastique_sd <- calibrate_prior_sd(
+enthusiastic_sd <- calibrate_prior_sd(
   mean = log(or_estimate),
   target_p = 0.85,
   threshold = 0 # 5% probability that log(OR) > 0 (NIV harmful vs O2)
 )
 
-# Belief in NIV protective effect with 5% chance of harm (OR > 1)
+# Belief in NIV protective effect with 15% chance of harm (OR > 1)
 priors_reintubation_d7[["Enthusiastic"]] <- data.frame(
   prior_mean = log(or_estimate), # Logarithmic OR for reintubation
-  prior_sd = enthusiastique_sd,
+  prior_sd = enthusiastic_sd,
   interpretation = "Belief in NIV protection with 15% chance of harm"
 )
 ### 3. Pessimistic ----
 # Build as the opposite of the Enthusiatic prior
 priors_reintubation_d7[["Pessimistic"]] <- data.frame(
   prior_mean = -log(or_estimate), # Logarithmic OR for reintubation
-  prior_sd = enthusiastique_sd,
-  interpretation = "Assumes NIV si worse than oxygen therapy but allows 15% chance of benefit."
+  prior_sd = enthusiastic_sd,
+  interpretation = "Assumes NIV is worse than oxygen therapy but allows 15% chance of benefit."
 )
 
 ### 4. Skeptical prior ----
@@ -175,26 +178,30 @@ priors_mortality_d30_clean <- priors_mortality_d30 %>%
 print(priors_mortality_d30_clean)
 
 # print(priors_death)
+
+priors_reintubation_d30 <- priors_reintubation_d7
 priors_hcai_d7 <- priors_mortality_d30
 priors_pneumonia_d7 <- priors_mortality_d30
+priors_hcai_d30 <- priors_hcai_d7
+priors_pneumonia_d30 <- priors_pneumonia_d7
+priors_mortality_d90 <- priors_mortality_d30
+priors_hosLOS <- priors_mortality_d30[1, ]
+priors_icuLOS <- priors_mortality_d30[1, ]
+
 
 # Visualisation des priors -------------------------------------------------------------------------
 # Usage with your data (with legend)
 p1 <- plot_priors_distributions(priors_reintubation_d7)
 p1
-# Version without legend if needed
 
-# Pour des figures de travail (plus légères)
-
-
-ggsave(
-  plot = p1,
-  filename = paste0(here("outputs", "figures"), "/prior_distributions.tiff"), # TIFF pour publication
-  width = 7, # Largeur en pouces (standard journal)
-  height = 5, # Hauteur en pouces (ratio ~1.4)
-  dpi = 600, # 600 dpi pour impression
-  device = "tiff" # Expliciter le format
-)
+# ggsave(
+#   plot = p1,
+#   filename = paste0(here("outputs", "figures"), "/prior_distributions.tiff"),
+#   width = 7,
+#   height = 5,
+#   dpi = 600,
+#   device = "tiff"
+# )
 
 
 # Intercept prior (eSupllemental method) ---------------------------------------------------------

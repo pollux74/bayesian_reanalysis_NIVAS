@@ -1,3 +1,10 @@
+# =============================================
+# Project : Bayesian reanalysis of NIVAS
+# Script : functions.R
+# Author : A. Naudet--Lasserre
+# Date last modification : 2025-09-01
+# ============================================
+
 # Priors ------------------------------------------------------------------
 
 # Function
@@ -261,13 +268,22 @@ fit_brm_opti <- function(data, outcome, explic, intercept = NULL) {
     }
 
     formula <- as.formula(paste0(outcome, " ~ ", explic))
+    
+    if (is.factor(data[[outcome]])){
+      print("outcome is a factor")
+      fam <- bernoulli(link = 'logit')
+    }
+    if (is.numeric(data[[outcome]])){
+      print("outcome is a numeric")
+      fam <- gaussian()
+    }
     # Fit model
     model_list[[i]] <- tryCatch(
       {
-        brm(
+        model <- brm(
           formula,
           data = data,
-          family = bernoulli(link = "logit"),
+          family = fam,
           prior = prior_l,
           iter = 4000,
           warmup = 1000,
@@ -288,103 +304,37 @@ fit_brm_opti <- function(data, outcome, explic, intercept = NULL) {
   return(model_list)
 }
 
-# # Estimate marginal ARR for multivariate models
-# This calculates the average treatment effect across the actual study population
-estimate_ARR_marginal <- function(model, df, group_var = "group") {
-  # Load required library
-  require(brms)
-  require(tidybayes)
-
-  # Get the levels of the treatment variable
-  group_levels <- levels(as.factor(df[[group_var]]))
-
-  if (length(group_levels) != 2) {
-    stop("Group variable must have exactly 2 levels")
-  }
-
-  # Create datasets for control and treatment scenarios
-  # Everyone gets assigned to control group
-  df_control <- df
-  df_control[[group_var]] <- factor(group_levels[1], levels = group_levels)
-
-  # Everyone gets assigned to treatment group
-  df_treatment <- df
-  df_treatment[[group_var]] <- factor(group_levels[2], levels = group_levels)
-
-  # Get posterior predictions for both scenarios
-  # posterior_epred returns probability of event for each patient and each draw
-  cat("Computing posterior predictions for control scenario...\n")
-  pred_control <- posterior_epred(model, newdata = df_control, allow_new_levels = TRUE)
-
-  cat("Computing posterior predictions for treatment scenario...\n")
-  pred_treatment <- posterior_epred(model, newdata = df_treatment, allow_new_levels = TRUE)
-
-  # Calculate ARR for each posterior draw
-  # ARR = average risk in control - average risk in treatment
-  # rowMeans gives the marginal (population-average) risk for each draw
-  marginal_risk_control <- rowMeans(pred_control)
-  marginal_risk_treatment <- rowMeans(pred_treatment)
-
-  # Marginal ARR = difference in marginal risks
-  arr_marginal <- marginal_risk_control - marginal_risk_treatment
-
-  # Calculate credible interval
-  arr_hdi <- ggdist::hdi(arr_marginal, .width = 0.95)
-
-  # Add some diagnostic information
-  cat(
-    "Marginal risk in control group: ",
-    round(mean(marginal_risk_control) * 100, 1), "%\n"
-  )
-  cat(
-    "Marginal risk in treatment group: ",
-    round(mean(marginal_risk_treatment) * 100, 1), "%\n"
-  )
-  cat(
-    "Marginal ARR: ",
-    round(mean(arr_marginal) * 100, 1), "%\n"
-  )
-
-  return(list(
-    arr = arr_marginal,
-    arr_hdi = arr_hdi,
-    marginal_risk_control = marginal_risk_control,
-    marginal_risk_treatment = marginal_risk_treatment
-  ))
-}
-
-
 estimate_ARR <- function(draws, logOR, model = NULL, df = NULL) {
   if (!is.null(model)) {
     # ARR marginal avec les données d'entraînement
     cat("Using marginal ARR calculation...\n")
-
+    
     model_data <- model$data
     group_levels <- levels(model_data$group)
-
+    
     # Tous les patients en contrôle
     df_control <- model_data
     df_control$group <- factor(group_levels[1], levels = group_levels)
-
+    
     # Tous les patients en traitement
     df_treatment <- model_data
     df_treatment$group <- factor(group_levels[2], levels = group_levels)
-
+    
     # Prédictions
     pred_control <- posterior_epred(model, newdata = df_control)
     pred_treatment <- posterior_epred(model, newdata = df_treatment)
-
+    
     # ARR marginal
     risk_control <- rowMeans(pred_control)
     risk_treatment <- rowMeans(pred_treatment)
     arr <- risk_control - risk_treatment
     arr_hdi <- hdi(arr, .width = 0.95)
-
+    
     # Diagnostics
     cat("Marginal risk control:", round(mean(risk_control) * 100, 1), "%\n")
     cat("Marginal risk treatment:", round(mean(risk_treatment) * 100, 1), "%\n")
     cat("Marginal ARR:", round(mean(arr) * 100, 1), "%\n")
-
+    
     return(list(arr = arr, arr_hdi = arr_hdi))
   } else {
     # ARR original pour modèles bivariés
@@ -485,7 +435,7 @@ compute_summary_metrics <- function(draws_df, prior_name = NULL) {
 #' @param model_list List of brmsfit objects
 #' @param prior_names Vector of corresponding prior names
 #' @param group_name Group variable name (without "b_" prefix)
-#' @return List with 'summary' and 'draws' dataframes
+#' #' @return List with 'summary' and 'draws' dataframes
 
 compute_posterior_metrics <- function(model_list, prior_names, group_name) {
   # Input validation
@@ -632,68 +582,6 @@ plot_risk_reduction <- function(rr_data, type = "ARR", outcome = "reintubation")
 }
 
 
-#' Analyse a brmsfit list of n priors object and return a publication ready table and figure
-#'
-#' @param outcome -> explanatory variable
-#' @param df -> Dataset
-#' @param predicteur -> Groups of treatment (single word = bivariate, multiple words = multivariate)
-#' @param m_list -> list of brms models
-#' @param ARR -> logical, whether to compute ARR (only effective if bivariate model)
-#' @param verbose -> logical, whether to show diagnostic messages
-#'
-#' @returns Table with OR (and ARR if bivariate) 95 CrI and posterior probability density plots
-#' @export
-#' @requires functions compute_posterior_metrics, format_publication_table
-#' @examples
-#' # Bivariate model (will compute ARR)
-#' analyse_outcome("oneOF7", df_aki, "group", model_list_oneOF7_aki)
-#'
-#' # Multivariate model (will NOT compute ARR)
-#' analyse_outcome("oneOF7", df_aki, "group age severity", model_list_multivar)
-# Corrected ARR estimation function
-estimate_ARR <- function(draws, logOR, model = NULL, df = NULL) {
-  if (!is.null(model)) {
-    # Marginal ARR using model training data
-    cat("Using marginal ARR calculation...\n")
-
-    model_data <- model$data
-    group_levels <- levels(model_data$group)
-
-    # All patients assigned to control
-    df_control <- model_data
-    df_control$group <- factor(group_levels[1], levels = group_levels)
-
-    # All patients assigned to treatment
-    df_treatment <- model_data
-    df_treatment$group <- factor(group_levels[2], levels = group_levels)
-
-    # Get posterior predictions
-    pred_control <- posterior_epred(model, newdata = df_control)
-    pred_treatment <- posterior_epred(model, newdata = df_treatment)
-
-    # Calculate marginal ARR
-    risk_control <- rowMeans(pred_control)
-    risk_treatment <- rowMeans(pred_treatment)
-    arr <- risk_control - risk_treatment
-    arr_hdi <- hdi(arr, .width = 0.95)
-
-    # Display diagnostics
-    cat("Marginal risk control:", round(mean(risk_control) * 100, 1), "%\n")
-    cat("Marginal risk treatment:", round(mean(risk_treatment) * 100, 1), "%\n")
-    cat("Marginal ARR:", round(mean(arr) * 100, 1), "%\n")
-
-    return(list(arr = arr, arr_hdi = arr_hdi))
-  } else {
-    # Original ARR calculation for bivariate models
-    cat("Using original ARR calculation...\n")
-    intercept <- draws[["b_Intercept"]]
-    p_control <- plogis(intercept)
-    p_treatment <- plogis(intercept + logOR)
-    arr <- p_control - p_treatment
-    arr_hdi <- hdi(arr, .width = 0.95)
-    return(list(arr = arr, arr_hdi = arr_hdi))
-  }
-}
 
 # Main analysis function with corrected marginal ARR
 analyse_outcome <- function(outcome, df, predicteur, m_list, ARR = TRUE, verbose = FALSE) {
@@ -717,7 +605,6 @@ analyse_outcome <- function(outcome, df, predicteur, m_list, ARR = TRUE, verbose
 
   cat_verbose("Priors:", paste(p_names, collapse = ", "), "\n")
   cat_verbose("Groups:", paste(rownames(fixef(m_list[[1]])), collapse = ", "), "\n")
-
   # Extract posterior draws from each model
   cat_verbose("Extracting posterior draws...\n")
   draws_list <- lapply(seq_along(m_list), function(i) {
@@ -798,6 +685,7 @@ analyse_outcome <- function(outcome, df, predicteur, m_list, ARR = TRUE, verbose
       logOR <- original_draws[[paste0("b_", group_name)]]
 
       # Pass model and dataframe for marginal calculation
+      cat_verbose("ici")
       estimate_ARR(
         draws = original_draws,
         logOR = logOR,
@@ -939,6 +827,7 @@ analyse_outcome <- function(outcome, df, predicteur, m_list, ARR = TRUE, verbose
 
   return(result)
 }
+
 
 
 #' Format publication table for OR-only (multivariate case)
@@ -1179,3 +1068,4 @@ format_publication_table_OR_only <- function(posterior_metrics, prior_names, out
     "P_OR_less_than_1" = sprintf("%.0f%%", df$p_beneficial * 100)
   )
 }
+
